@@ -1,91 +1,54 @@
 const express = require("express");
 const bcrypt = require("bcryptjs");
-const db = require("../db/database");
-
+const jwt = require("jsonwebtoken");
+const mongoose = require("mongoose");
 const router = express.Router();
 
-console.log("AUTH ROUTE LOADED");
+// User Model
+const userSchema = new mongoose.Schema({
+  name: String,
+  email: { type: String, unique: true },
+  password: String,
+  role: { type: String, default: "user" },
+}, { timestamps: true });
 
-// TEST ROUTE
-router.get("/test", (req, res) => {
-  res.send("DEEPU TEST 123");
-});
+const User = mongoose.models.User || mongoose.model("User", userSchema);
 
 // REGISTER
 router.post("/register", async (req, res) => {
-  const { name, email, password, role } = req.body;
-
+  const { name, email, password } = req.body;
+  if (!name || !email || !password)
+    return res.status(400).json({ message: "All fields required" });
   try {
-    const hashedPassword = await bcrypt.hash(password, 10);
-
-    db.run(
-      "INSERT INTO users (name, email, password, role) VALUES (?, ?, ?, ?)",
-      [name, email, hashedPassword, role || "user"],
-      function (err) {
-        if (err) {
-          return res.status(400).json({
-            success: false,
-            message: err.message,
-          });
-        }
-
-        res.json({
-          success: true,
-          message: "User Registered",
-        });
-      }
-    );
-  } catch (error) {
-    res.status(500).json({
-      success: false,
-      message: error.message,
-    });
+    const existing = await User.findOne({ email });
+    if (existing) return res.status(400).json({ message: "User already exists" });
+    const hashed = await bcrypt.hash(password, 10);
+    const user = await User.create({ name, email, password: hashed });
+    res.status(201).json({ message: "Registered successfully", userId: user._id });
+  } catch (err) {
+    res.status(500).json({ message: err.message });
   }
 });
 
 // LOGIN
-router.post("/login", (req, res) => {
+router.post("/login", async (req, res) => {
   const { email, password } = req.body;
-
-  db.get(
-    "SELECT * FROM users WHERE email = ?",
-    [email],
-    async (err, user) => {
-      if (err) {
-        return res.status(500).json({
-          success: false,
-          message: err.message,
-        });
-      }
-
-      if (!user) {
-        return res.status(404).json({
-          success: false,
-          message: "User not found",
-        });
-      }
-
-      const isMatch = await bcrypt.compare(password, user.password);
-
-      if (!isMatch) {
-        return res.status(401).json({
-          success: false,
-          message: "Invalid password",
-        });
-      }
-
-      res.json({
-        success: true,
-        message: "Login Successful",
-        user: {
-          id: user.id,
-          name: user.name,
-          email: user.email,
-          role: user.role,
-        },
-      });
-    }
-  );
+  if (!email || !password)
+    return res.status(400).json({ message: "All fields required" });
+  try {
+    const user = await User.findOne({ email });
+    if (!user) return res.status(404).json({ message: "User not found" });
+    const match = await bcrypt.compare(password, user.password);
+    if (!match) return res.status(401).json({ message: "Invalid credentials" });
+    const token = jwt.sign(
+      { id: user._id, email: user.email, role: user.role },
+      process.env.JWT_SECRET,
+      { expiresIn: "1d" }
+    );
+    res.json({ message: "Login successful", token, user: { id: user._id, name: user.name, email: user.email, role: user.role } });
+  } catch (err) {
+    res.status(500).json({ message: err.message });
+  }
 });
 
 module.exports = router;
