@@ -2,13 +2,7 @@
 import { useState } from "react";
 import Navbar from "../components/Navbar";
 
-// 🔥 Firebase
-import { auth, db } from "../firebase";
-import {
-  signInWithEmailAndPassword,
-  createUserWithEmailAndPassword
-} from "firebase/auth";
-import { doc, setDoc, getDoc } from "firebase/firestore";
+const API_URL = "https://services-provider-backend-1.onrender.com/api/auth";
 
 export default function Auth({ onAuth, addToast, setPage, user }) {
 
@@ -62,86 +56,92 @@ export default function Auth({ onAuth, addToast, setPage, user }) {
     return e;
   }
 
-  // 🔥 MAIN SUBMIT
   async function submit() {
-    const e = validate();
-    setErrors(e);
-    if (Object.keys(e).length) return;
+  const e = validate();
+  setErrors(e);
 
-    setLoading(true);
+  if (Object.keys(e).length) return;
 
-    try {
-      let userCredential;
+  setLoading(true);
 
-      // 🔐 LOGIN
-      if (mode === "login") {
-        userCredential = await signInWithEmailAndPassword(
-          auth,
-          form.email,
-          form.password
-        );
-
-        const docRef = doc(db, "users", userCredential.user.uid);
-        const docSnap = await getDoc(docRef);
-
-        if (docSnap.exists()) {
-          const userData = docSnap.data();
-
-          onAuth({
-            id: userCredential.user.uid,
-            ...userData
-          });
-
-          // 🔐 STRICT ADMIN CHECK
-          if (
-            role === "admin" &&
-            userData.role === "admin" &&
-            form.email === "keerthisreevelamuri@gmail.com"
-          ) {
-            setPage("admin");   // 🛡️ ONLY real admin
-          } else {
-            setPage("home");    // 👤 everyone else
-          }
-
-        } else {
-          addToast("User data not found ❌", "error");
+  try {
+    // LOGIN
+    if (mode === "login") {
+      const response = await fetch(
+        "https://services-provider-backend-1.onrender.com/api/auth/login",
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json"
+          },
+          body: JSON.stringify({
+            email: form.email,
+            password: form.password
+          })
         }
+      );
+
+      const data = await response.json();
+
+      if (!response.ok) {
+        throw new Error(data.message);
       }
 
-      // 🆕 SIGNUP
-      else {
-        userCredential = await createUserWithEmailAndPassword(
-          auth,
-          form.email,
-          form.password
-        );
+      localStorage.setItem("token", data.token);
 
-        await setDoc(doc(db, "users", userCredential.user.uid), {
-          name: form.name,
-          email: form.email,
-          phone: form.phone,
-          role: role, // 👈 still allow (UI unchanged)
-        });
+      onAuth(data.user);
 
-        onAuth({
-          id: userCredential.user.uid,
-          name: form.name,
-          email: form.email,
-          role: role,
-        });
-
-        addToast("Signup Successful 🎉", "success");
-
+      if (
+        role === "admin" &&
+        data.user.role === "admin" &&
+        data.user.email === "keerthisreevelamuri@gmail.com"
+      ) {
+        setPage("admin");
+      } else {
         setPage("home");
       }
 
-    } catch (error) {
-      console.log(error.message);
-      addToast(error.message, "error");
+      addToast("Login Successful 🎉", "success");
     }
 
-    setLoading(false);
+    // REGISTER
+    else {
+      const response = await fetch(
+        "https://services-provider-backend-1.onrender.com/api/auth/register",
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json"
+          },
+          body: JSON.stringify({
+            name: form.name,
+            email: form.email,
+            password: form.password,
+            phone: form.phone,
+            role: role
+          })
+        }
+      );
+
+      const data = await response.json();
+
+      if (!response.ok) {
+        throw new Error(data.message);
+      }
+
+      onAuth(data.user);
+
+      addToast("Signup Successful 🎉", "success");
+
+      setPage("home");
+    }
+  } catch (error) {
+    console.log(error);
+    addToast(error.message, "error");
   }
+
+  setLoading(false);
+}
 
   return (
     <>
